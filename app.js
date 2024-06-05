@@ -5,14 +5,31 @@ const express = require("express");
 const connectDB = require("./config/connect");
 const notFoundMiddleware = require("./middleware/not-found");
 const errorHandlerMiddleware = require("./middleware/error-handler");
+const authMiddleware = require("./middleware/authentication");
 
 const app = express();
 app.use(express.json());
 
 // Routers
 const authRouter = require("./routes/auth");
+const fileRouter = require("./routes/file");
+const commentRouter = require("./routes/comment");
+const likeRouter = require("./routes/like");
+const reelRouter = require("./routes/reel");
+const rewardRouter = require("./routes/reward");
+const feedRouter = require("./routes/feed");
+const user = require("./routes/user");
+const replyRouter = require("./routes/reply");
 
-app.use("/auth", authRouter);
+app.use("/oauth", authRouter);
+app.use("/file", fileRouter);
+app.use("/user", authMiddleware, user);
+app.use("/comment", authMiddleware, commentRouter);
+app.use("/reply", authMiddleware, replyRouter);
+app.use("/like", authMiddleware, likeRouter);
+app.use("/reel", authMiddleware, reelRouter);
+app.use("/reward", authMiddleware, rewardRouter);
+app.use("/feed", authMiddleware, feedRouter);
 
 // Middleware
 app.use(notFoundMiddleware);

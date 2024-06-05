@@ -3,24 +3,60 @@ const { StatusCodes } = require("http-status-codes");
 const { BadRequestError, UnauthenticatedError } = require("../../errors");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
+const axios = require("axios");
+const Reward = require("../../models/Reward");
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-const signInWithOauth = async (req, res) => {
-  const { provider, id_token } = req.body;
+const checkUsernameAvailability = async (req, res) => {
+  const { username } = req.body;
 
-  if (!provider || !id_token || !["google", "facebook"].includes(provider)) {
-    throw new BadRequestError("Invalid Request");
+  if (!username) {
+    throw new BadRequestError("Username is required");
+  }
+
+  const usernameRegex = /^[a-zA-Z0-9_]{3,30}$/;
+
+  if (!usernameRegex.test(username)) {
+    throw new BadRequestError(
+      "Invalid username. Username can only contain letters, numbers, and underscores, and must be between 3 and 30 characters long."
+    );
+  }
+
+  const user = await User.findOne({ username });
+
+  if (user) {
+    return res.status(StatusCodes.OK).json({ available: false });
+  }
+
+  res.status(StatusCodes.OK).json({ available: true });
+};
+
+const signUpWithOauth = async (req, res) => {
+  const { provider, id_token, name, userImage, username, bio, email } =
+    req.body;
+
+  if (
+    !provider ||
+    !id_token ||
+    !name ||
+    !userImage ||
+    !username ||
+    !bio ||
+    !email ||
+    !["google", "facebook"].includes(provider)
+  ) {
+    throw new BadRequestError("Invalid body request");
   }
 
   try {
-    let email, user;
+    let verifiedEmail;
 
     if (provider === "facebook") {
-      const { header } = jwt.decode(id_token, { complete: true });
-      const kid = header.kid;
-      const publicKey = await getKey(kid);
-      ({ email } = jwt.verify(id_token, publicKey));
+      const { data } = await axios.get(
+        `https://graph.facebook.com/v20.0/me?access_token=${id_token}&fields=id,email`
+      );
+      verifiedEmail = data.email;
     }
 
     if (provider === "google") {
@@ -28,34 +64,39 @@ const signInWithOauth = async (req, res) => {
         idToken: id_token,
         audience: process.env.GOOGLE_CLIENT_ID,
       });
-      ({ email } = ticket.getPayload());
+      const payload = ticket.getPayload();
+      verifiedEmail = payload.email;
+    }
+    if (verifiedEmail != email) {
+      throw new UnauthenticatedError("Invalid Token or expired");
     }
 
-    user = await User.findOneAndUpdate(
-      { email: email },
-      { email_verified: true },
-      { upsert: true, new: true }
-    );
+    let user = await User.findOne({ email: verifiedEmail });
+
+    if (!user) {
+      user = new User({
+        email: verifiedEmail,
+        username,
+        name,
+        userImage,
+        bio,
+      });
+      await user.save();
+      const reward = new Reward({ user: user._id });
+      await reward.save();
+    }
 
     const accessToken = user.createAccessToken();
     const refreshToken = user.createRefreshToken();
-    let phone_exist = false;
-    let login_pin_exist = false;
-
-    if (user.phone_number) {
-      phone_exist = true;
-    }
-    if (user.login_pin) {
-      login_pin_exist = true;
-    }
 
     res.status(StatusCodes.OK).json({
       user: {
         name: user.name,
-        userId: user.id,
+        id: user.id,
+        username: user.username,
+        userImage: user.userImage,
         email: user.email,
-        phone_exist,
-        login_pin_exist,
+        bio: user.bio,
       },
       tokens: { access_token: accessToken, refresh_token: refreshToken },
     });
@@ -65,4 +106,87 @@ const signInWithOauth = async (req, res) => {
   }
 };
 
-module.exports = { signInWithOauth };
+const signInWithOauth = async (req, res) => {
+  const { provider, id_token } = req.body;
+
+  if (!provider || !id_token || !["google", "facebook"].includes(provider)) {
+    throw new BadRequestError("Invalid body request");
+  }
+
+  try {
+    let verifiedEmail;
+
+    if (provider === "facebook") {
+      const { data } = await axios.get(
+        `https://graph.facebook.com/v20.0/me?access_token=${id_token}&fields=id,email`
+      );
+      verifiedEmail = data.email;
+    }
+
+    if (provider === "google") {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: id_token,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      verifiedEmail = payload.email;
+    }
+
+    const user = await User.findOne({ email: verifiedEmail });
+
+    if (!user) {
+      throw new UnauthenticatedError("User does not exist");
+    }
+
+    const accessToken = user.createAccessToken();
+    const refreshToken = user.createRefreshToken();
+
+    res.status(StatusCodes.OK).json({
+      user: {
+        name: user.name,
+        id: user.id,
+        username: user.username,
+        userImage: user.userImage,
+        email: user.email,
+        bio: user.bio,
+      },
+      tokens: { access_token: accessToken, refresh_token: refreshToken },
+    });
+  } catch (error) {
+    console.error(error);
+    throw new UnauthenticatedError("Invalid Token or expired");
+  }
+};
+
+const refreshToken = async (req, res) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token) {
+    throw new BadRequestError("Refresh token is required");
+  }
+
+  try {
+    const payload = jwt.verify(refresh_token, process.env.REFRESH_TOKEN_SECRET);
+    const user = await User.findById(payload.userId);
+
+    if (!user) {
+      throw new UnauthenticatedError("Invalid refresh token");
+    }
+
+    const newAccessToken = user.createAccessToken();
+    const newRefreshToken = user.createRefreshToken();
+
+    res.status(StatusCodes.OK).json({
+      tokens: { access_token: newAccessToken, refresh_token: newRefreshToken },
+    });
+  } catch (error) {
+    console.error(error);
+    throw new UnauthenticatedError("Invalid refresh token");
+  }
+};
+
+module.exports = {
+  signInWithOauth,
+  signUpWithOauth,
+  refreshToken,
+  checkUsernameAvailability,
+};
