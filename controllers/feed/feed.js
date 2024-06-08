@@ -22,7 +22,7 @@ const getLikedVideos = async (req, res) => {
     })
       .populate({
         path: "reel",
-        populate: { path: "user", select: "username userImage name" },
+        populate: { path: "user", select: "username userImage name id" },
         select: "-likes -comments",
       })
       .skip(parseInt(offset))
@@ -36,16 +36,19 @@ const getLikedVideos = async (req, res) => {
         const commentsCount = await Comment.countDocuments({
           reel: reel._id,
         });
+        const reelJSON = reel.toJSON();
+        reelJSON.user.isFollowing = user.following.includes(reel.user._id);
 
         return {
-          ...reel.toJSON(),
+          ...reelJSON,
           likesCount,
           commentsCount,
+          isLiked: true,
         };
       })
     );
 
-    res.status(StatusCodes.OK).json({ likedVideos: likedVideosWithCounts });
+    res.status(StatusCodes.OK).json({ reelData: likedVideosWithCounts });
   } catch (error) {
     console.error(error);
     res
@@ -67,7 +70,7 @@ const getReelPosts = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(parseInt(offset))
       .limit(parseInt(limit))
-      .populate("user", "name userImage username")
+      .populate("user", "name userImage username id")
       .select("-comments -likes")
       .exec();
 
@@ -77,16 +80,21 @@ const getReelPosts = async (req, res) => {
         const commentsCount = await Comment.countDocuments({
           reel: reelPost._id,
         });
-
+        const reelPostJSON = reelPost.toJSON();
+        reelPostJSON.user.isFollowing = user.following.includes(
+          reelPost.user._id
+        );
+        const isLiked = await Like.exists({ user: userId, reel: reelPost._id });
         return {
-          ...reelPost.toJSON(),
+          ...reelPostJSON,
           likesCount,
           commentsCount,
+          isLiked: !!isLiked,
         };
       })
     );
 
-    res.status(StatusCodes.OK).json({ myReelPosts: myReelPostsWithCounts });
+    res.status(StatusCodes.OK).json({ reelData: myReelPostsWithCounts });
   } catch (error) {
     console.error(error);
     throw new BadRequestError(error);
@@ -115,22 +123,25 @@ const getAllHistoryReels = async (req, res) => {
       allHistoryReels.map(async (historyReel) => {
         const reel = await Reel.findById(historyReel.reel)
           .select("-comments -likes")
-          .populate("user", "name userImage username")
+          .populate("user", "name userImage username id")
           .exec();
         const likesCount = await Like.countDocuments({ reel: reel._id });
         const commentsCount = await Comment.countDocuments({
           reel: reel._id,
         });
-
+        const reelJSON = reel.toJSON();
+        reelJSON.user.isFollowing = user.following.includes(reel.user._id);
+        const isLiked = await Like.exists({ user: userId, reel: reelPost._id });
         return {
-          ...reel.toJSON(),
+          ...reelJSON,
           likesCount,
+          isLiked: !!isLiked,
           commentsCount,
         };
       })
     );
 
-    res.status(StatusCodes.OK).json({ watchedReels: watchedReelsWithCounts });
+    res.status(StatusCodes.OK).json({ reelData: watchedReelsWithCounts });
   } catch (error) {
     console.error(error);
     throw new BadRequestError(error);
@@ -192,96 +203,134 @@ const getHomeFeed = async (req, res) => {
   try {
     const following = user.following;
 
-    const userHistory = await UserHistory.findOne({ user: userId });
+    const userHistory = await UserHistory.findOne({ user: userId }).populate(
+      "user",
+      "name id username userImage"
+    );
     const watchedReelIds = userHistory
       ? userHistory.reels.map((r) => r.reel)
       : [];
 
+    const uniqueReelsMap = new Map();
+    let totalReels = 0;
+
+    // Helper function to add reels to the unique map and count
+    const addReelsToMap = async (reels) => {
+      for (const reel of reels) {
+        if (!uniqueReelsMap.has(reel._id.toString())) {
+          const likesCount = await Like.countDocuments({ reel: reel._id });
+          const commentsCount = await Comment.countDocuments({
+            reel: reel._id,
+          });
+          const isLiked = await Like.exists({ user: userId, reel: reel._id });
+          reel.isLiked = !!isLiked;
+          reel.likesCount = likesCount;
+          reel.commentsCount = commentsCount;
+          uniqueReelsMap.set(reel._id.toString(), reel);
+          totalReels += 1;
+        }
+      }
+    };
+
+    // Fetch reels from following
     const reelsFromFollowing = await Reel.find({
       user: { $in: following },
       _id: { $nin: watchedReelIds },
     })
       .sort({ createdAt: -1 })
-      .limit(Math.round(limit * 0.5))
-      .populate("user", "username name userImage")
+      .limit(limit)
+      .select("-likes -comments")
+      .populate("user", "username name id userImage")
       .exec();
 
-    const mostLikedReels = await Reel.aggregate([
-      { $match: { _id: { $nin: watchedReelIds } } },
-      {
-        $project: {
-          user: 1,
-          videoUri: 1,
-          thumbUri: 1,
-          caption: 1,
-          likesCount: { $size: "$likes" },
-          commentsCount: { $size: "$comments" },
-          createdAt: 1,
-        },
-      },
-      { $sort: { likesCount: -1, commentsCount: -1, createdAt: -1 } },
-      { $limit: Math.round(limit * 0.3) },
-      {
-        $lookup: {
-          from: "users",
-          localField: "user",
-          foreignField: "_id",
-          as: "user",
-        },
-      },
-      { $unwind: "$user" },
-      {
-        $project: {
-          videoUri: 1,
-          thumbUri: 1,
-          caption: 1,
-          createdAt: 1,
-          likesCount: 1,
-          commentsCount: 1,
-          user: {
-            username: "$user.username",
-            name: "$user.name",
-            userImage: "$user.userImage",
+    await addReelsToMap(reelsFromFollowing);
+
+    // Fetch most liked reels
+    if (totalReels < limit + offset) {
+      const remainingLimit = limit + offset - totalReels;
+      const mostLikedReels = await Reel.aggregate([
+        { $match: { _id: { $nin: watchedReelIds } } },
+        {
+          $project: {
+            user: 1,
+            videoUri: 1,
+            thumbUri: 1,
+            caption: 1,
+            likesCount: { $size: "$likes" },
+            commentsCount: { $size: "$comments" },
+            createdAt: 1,
           },
         },
-      },
-    ]);
+        { $sort: { likesCount: -1, commentsCount: -1, createdAt: -1 } },
+        { $limit: remainingLimit },
+        {
+          $lookup: {
+            from: "users",
+            localField: "user",
+            foreignField: "_id",
+            as: "user",
+          },
+        },
+        { $unwind: "$user" },
+        {
+          $project: {
+            videoUri: 1,
+            thumbUri: 1,
+            caption: 1,
+            createdAt: 1,
+            likesCount: 1,
+            commentsCount: 1,
+            user: {
+              username: "$user.username",
+              name: "$user.name",
+              id: "$user._id",
+              userImage: "$user.userImage",
+            },
+          },
+        },
+      ]);
 
-    const latestReels = await Reel.find({ _id: { $nin: watchedReelIds } })
-      .sort({ createdAt: -1 })
-      .limit(Math.round(limit * 0.2))
-      .populate("user", "username name userImage")
-      .exec();
+      await addReelsToMap(mostLikedReels);
+    }
 
-    const allReels = [...reelsFromFollowing, ...mostLikedReels, ...latestReels];
-    const uniqueReelsMap = new Map();
+    // Fetch latest reels
+    if (totalReels < limit + offset) {
+      const remainingLimit = limit + offset - totalReels;
+      const latestReels = await Reel.find({ _id: { $nin: watchedReelIds } })
+        .sort({ createdAt: -1 })
+        .limit(remainingLimit)
+        .populate("user", "username name id userImage")
+        .exec();
 
-    allReels.forEach((reel) => {
-      if (!uniqueReelsMap.has(reel._id.toString())) {
-        uniqueReelsMap.set(reel._id.toString(), reel);
-      }
-    });
+      await addReelsToMap(latestReels);
+    }
 
     const uniqueReels = Array.from(uniqueReelsMap.values());
 
-    const response = uniqueReels.map((reel) => ({
+    if (offset >= uniqueReels.length) {
+      return res.status(StatusCodes.OK).json({ reels: [] });
+    }
+
+    // Slice the result based on offset and limit
+    const response = uniqueReels.slice(offset, offset + limit).map((reel) => ({
       _id: reel._id,
       videoUri: reel.videoUri,
       thumbUri: reel.thumbUri,
       caption: reel.caption,
       createdAt: reel.createdAt,
       user: {
+        _id: reel.user.id,
         username: reel.user.username,
         name: reel.user.name,
         userImage: reel.user.userImage,
+        isFollowing: user.following.includes(reel.user.id),
       },
       likesCount: reel.likesCount,
       commentsCount: reel.commentsCount,
+      isLiked: !!reel.isLiked,
     }));
 
-    res
-      .status(StatusCodes.OK)
-      .json({ reels: response.slice(offset, offset + limit) });
+    res.status(StatusCodes.OK).json({ reels: response });
   } catch (error) {
     console.error(error);
     throw new BadRequestError(error);

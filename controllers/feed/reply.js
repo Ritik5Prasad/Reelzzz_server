@@ -23,6 +23,7 @@ const createReply = async (req, res) => {
       hasGif: gifUrl ? true : false,
       gifUrl: gifUrl ? gifUrl : null,
       comment: commentId,
+      reel: comment.reel._id,
     });
     await newReply.save();
 
@@ -51,7 +52,6 @@ const createReply = async (req, res) => {
 
 const deleteReply = async (req, res) => {
   const { replyId } = req.params;
-
   try {
     const reply = await Reply.findByIdAndDelete(replyId);
 
@@ -66,6 +66,7 @@ const deleteReply = async (req, res) => {
 
 const getPaginatedReplies = async (req, res) => {
   const { commentId, limit = 10, offset = 0 } = req.query;
+  const userId = req.user.userId;
   try {
     // Fetch comments and sort them based on the defined criteria
     const replies = await Reply.find({ comment: commentId })
@@ -78,10 +79,14 @@ const getPaginatedReplies = async (req, res) => {
     const finalReplies = await Promise.all(
       replies.map(async (reply) => {
         const likesCount = await Like.countDocuments({ reply: reply._id });
-
+        const isLiked = await Like.countDocuments({
+          reply: reply.id,
+          user: userId,
+        });
         return {
           ...reply.toJSON(),
           likesCount,
+          isLiked: isLiked == 0 ? false : true,
         };
       })
     );

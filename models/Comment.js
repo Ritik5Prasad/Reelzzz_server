@@ -14,6 +14,11 @@ const CommentSchema = new mongoose.Schema({
   replies: [{ type: mongoose.Schema.Types.ObjectId, ref: "Reply" }],
 });
 
+CommentSchema.index({ user: 1 });
+CommentSchema.index({ reel: 1 });
+CommentSchema.index({ likes: 1 });
+CommentSchema.index({ mentionedUsers: 1 });
+CommentSchema.index({ replies: 1 });
 const Comment = mongoose.model("Comment", CommentSchema);
 
 module.exports = Comment;

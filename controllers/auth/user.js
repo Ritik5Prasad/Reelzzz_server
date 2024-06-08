@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const { BadRequestError, NotFoundError } = require("../../errors");
 const User = require("../../models/User");
 const Reel = require("../../models/Reel");
+const { default: mongoose } = require("mongoose");
 
 // Get user profile
 const getProfile = async (req, res) => {
@@ -40,28 +41,39 @@ const getProfile = async (req, res) => {
   }
 };
 
-const viewUserById = async (req, res) => {
-  const userId = req.params.userId;
+const viewUserByHandle = async (req, res) => {
+  const username = req.params.username;
 
-  if (!userId) {
-    throw new BadRequestError("Missing user ID in path parameter");
+  if (!username) {
+    throw new BadRequestError("Missing username in path parameter");
   }
 
-  const user = await User.findById(userId).select('-followers -following');
+  const user = await User.findOne({ username: username }).select(
+    "-followers -following"
+  );
+
   if (!user) {
     throw new NotFoundError("User not found");
   }
 
   const followersCount = await User.countDocuments({ following: user._id });
+  const isFollowing = await User.countDocuments({
+    following: user._id,
+    _id: req.user.userId,
+  });
   const followingCount = await User.countDocuments({ followers: user._id });
   const reelsCount = await Reel.countDocuments({ user: user._id });
 
   res.status(StatusCodes.OK).json({
     user: {
-      ...user._doc, // Include all user properties
+      id: user.id,
+      userImage: user.userImage,
+      username: user.username,
+      bio: user.bio,
       followersCount,
       followingCount,
       reelsCount,
+      isFollowing: isFollowing > 0,
     },
   });
 };
@@ -145,35 +157,171 @@ const toggleFollowing = async (req, res) => {
 
 const getFollowers = async (req, res) => {
   const userId = req.params.userId;
+  const currentUserId = req.user.userId;
+  const searchText = req.query.searchText;
+  const limit = parseInt(req.query.limit) || 10;
+  const offset = parseInt(req.query.offset) || 0;
 
   if (!userId) {
     throw new BadRequestError("Missing user ID in query parameter");
   }
 
-  const user = await User.findById(userId).populate("followers", "name username userImage");
+  const user = await User.findById(userId);
   if (!user) {
     throw new NotFoundError("User not found");
   }
 
-  const followers = user.followers;
-  res.status(StatusCodes.OK).json({ followers });
+  const followers = await User.aggregate([
+    {
+      $match: { _id: { $in: user.followers } },
+    },
+    {
+      $addFields: {
+        isFollowing: { $in: [currentUserId, "$following"] },
+      },
+    },
+    {
+      $match: {
+        $or: [
+          { name: { $regex: searchText, $options: "i" } },
+          { username: { $regex: searchText, $options: "i" } },
+        ],
+      },
+    },
+    {
+      $project: {
+        name: 1,
+        username: 1,
+        userImage: 1,
+        id: 1,
+        isFollowing: 1,
+      },
+    },
+    {
+      $sort: {
+        isFollowing: -1,
+      },
+    },
+    {
+      $skip: offset,
+    },
+    {
+      $limit: limit,
+    },
+  ]);
+
+  res.status(StatusCodes.OK).json(followers);
 };
 
-// Get following list
 const getFollowing = async (req, res) => {
   const userId = req.params.userId;
+  const currentUserId = new mongoose.Types.ObjectId(req.user.userId);
+  const searchText = req.query.searchText;
+  const limit = parseInt(req.query.limit) || 10;
+  const offset = parseInt(req.query.offset) || 0;
 
   if (!userId) {
     throw new BadRequestError("Missing user ID in query parameter");
   }
 
-  const user = await User.findById(userId).populate("following", "name username userImage");
+  const user = await User.findById(userId);
   if (!user) {
     throw new NotFoundError("User not found");
   }
 
-  const following = user.following;
-  res.status(StatusCodes.OK).json({ following });
+  const following = await User.aggregate([
+    {
+      $match: { _id: { $in: user.following } },
+    },
+    {
+      $addFields: {
+        isFollowing: { $in: [currentUserId, "$followers"] },
+      },
+    },
+    {
+      $match: {
+        $or: [
+          { name: { $regex: searchText, $options: "i" } },
+          { username: { $regex: searchText, $options: "i" } },
+        ],
+      },
+    },
+    {
+      $project: {
+        name: 1,
+        username: 1,
+        userImage: 1,
+        id: 1,
+        isFollowing: 1,
+        followersValue: 1,
+      },
+    },
+    {
+      $sort: {
+        isFollowing: -1,
+      },
+    },
+    {
+      $skip: offset,
+    },
+    {
+      $limit: limit,
+    },
+  ]);
+
+  console.log(following);
+  res.status(StatusCodes.OK).json(following);
+};
+
+const getUsersBySearch = async (req, res) => {
+  const searchText = req.query.text;
+  const limit = parseInt(req.query.limit) || 10;
+  const userId = req.user.userId;
+  let searchQuery = {};
+
+  if (searchText) {
+    searchQuery = {
+      $or: [
+        { name: { $regex: searchText, $options: "i" } },
+        { username: { $regex: searchText, $options: "i" } },
+      ],
+    };
+  }
+
+  let users = await User.aggregate([
+    {
+      $match: searchQuery,
+    },
+    {
+      $addFields: {
+        isFollowing: { $in: [userId, "$followers"] },
+      },
+    },
+    {
+      $match: {
+        _id: { $ne: userId },
+      },
+    },
+    {
+      $project: {
+        _id: 1,
+        username: 1,
+        userImage: 1,
+        name: 1,
+      },
+    },
+    {
+      $sort: {
+        isFollowing: -1,
+        createdAt: -1,
+      },
+    },
+    {
+      $limit: limit,
+    },
+  ]);
+
+  res.status(StatusCodes.OK).json({ users });
 };
 
 module.exports = {
@@ -182,5 +330,6 @@ module.exports = {
   toggleFollowing,
   getFollowers,
   getFollowing,
-  viewUserById,
+  viewUserByHandle,
+  getUsersBySearch,
 };

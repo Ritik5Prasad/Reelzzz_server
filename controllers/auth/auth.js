@@ -1,10 +1,15 @@
 const User = require("../../models/User");
 const { StatusCodes } = require("http-status-codes");
-const { BadRequestError, UnauthenticatedError } = require("../../errors");
+const {
+  BadRequestError,
+  UnauthenticatedError,
+  NotFoundError,
+} = require("../../errors");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
 const axios = require("axios");
 const Reward = require("../../models/Reward");
+const Reel = require("../../models/Reel");
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -132,10 +137,15 @@ const signInWithOauth = async (req, res) => {
       verifiedEmail = payload.email;
     }
 
-    const user = await User.findOne({ email: verifiedEmail });
+    const user = await User.findOne({ email: verifiedEmail }).select(
+      "-followers -following"
+    );
+    const followersCount = await User.countDocuments({ following: user._id });
+    const followingCount = await User.countDocuments({ followers: user._id });
+    const reelsCount = await Reel.countDocuments({ user: user._id });
 
     if (!user) {
-      throw new UnauthenticatedError("User does not exist");
+      throw new NotFoundError("User does not exist");
     }
 
     const accessToken = user.createAccessToken();
@@ -148,6 +158,9 @@ const signInWithOauth = async (req, res) => {
         username: user.username,
         userImage: user.userImage,
         email: user.email,
+        followersCount,
+        followingCount,
+        reelsCount,
         bio: user.bio,
       },
       tokens: { access_token: accessToken, refresh_token: refreshToken },

@@ -10,7 +10,6 @@ const {
 router.post("/check-username", checkUsernameAvailability);
 router.post("/login", signInWithOauth);
 router.post("/register", signUpWithOauth);
-
 router.post("/refresh-token", refreshToken);
 
 module.exports = router;

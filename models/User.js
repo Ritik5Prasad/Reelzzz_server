@@ -1,5 +1,5 @@
-const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
+const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
 
 const UserSchema = new mongoose.Schema(
   {
@@ -15,10 +15,7 @@ const UserSchema = new mongoose.Schema(
     username: {
       type: String,
       required: true,
-      match: [
-        /^[a-zA-Z0-9_]{3,30}$/,
-        "Please provide a valid username",
-      ],
+      match: [/^[a-zA-Z0-9_]{3,30}$/, "Please provide a valid username"],
       unique: true,
     },
     name: {
@@ -32,8 +29,8 @@ const UserSchema = new mongoose.Schema(
     bio: {
       type: String,
     },
-    followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-    following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   },
   { timestamps: true }
 );
@@ -52,6 +49,9 @@ UserSchema.methods.createRefreshToken = function () {
   });
 };
 
-const User = mongoose.model('User', UserSchema);
+UserSchema.index({ followers: 1 });
+UserSchema.index({ following: 1 });
+
+const User = mongoose.model("User", UserSchema);
 
 module.exports = User;

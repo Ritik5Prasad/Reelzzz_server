@@ -13,6 +13,9 @@ const ReelSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+ReelSchema.index({ user: 1 });
+ReelSchema.index({ likes: 1 });
+ReelSchema.index({ comments: 1 });
 const Reel = mongoose.model("Reel", ReelSchema);
 
 module.exports = Reel;

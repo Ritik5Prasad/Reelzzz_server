@@ -7,6 +7,7 @@ const jwt = require("jsonwebtoken");
 const Reel = require("../../models/Reel");
 const Comment = require("../../models/Comment");
 const Reply = require("../../models/Reply");
+const { default: mongoose } = require("mongoose");
 
 const likeComment = async (req, res) => {
   const commentId = req.params.commentId;
@@ -14,7 +15,7 @@ const likeComment = async (req, res) => {
     throw new BadRequestError("Comment Id not available");
   }
 
-  const userId = req.user;
+  const userId = req.user.userId;
 
   try {
     const comment = await Comment.findById(commentId).populate("reel");
@@ -32,9 +33,7 @@ const likeComment = async (req, res) => {
         comment.isLikedByAuthor = false;
         await comment.save();
       }
-      res
-        .status(StatusCodes.OK)
-        .json({ message: "Unliked", data: existingLike });
+      res.status(StatusCodes.OK).json({ msg: "Unliked", data: existingLike });
     } else {
       const newLike = new Like({ user: userId, comment: commentId });
       await newLike.save();
@@ -45,12 +44,12 @@ const likeComment = async (req, res) => {
       }
 
       await updateReward(userId, "tokens", 0.1);
-      res.status(StatusCodes.OK).json({ message: "Liked", data: newLike });
+      res.status(StatusCodes.OK).json({ msg: "Liked", data: newLike });
     }
   } catch (error) {
     console.error(error);
     if (error instanceof NotFoundError) {
-      res.status(StatusCodes.NOT_FOUND).json({ error: error.message });
+      res.status(StatusCodes.NOT_FOUND).json({ error: error.msg });
     } else {
       res
         .status(StatusCodes.INTERNAL_SERVER_ERROR)
@@ -84,9 +83,7 @@ const likeReply = async (req, res) => {
         reply.isLikedByAuthor = false;
         await reply.save();
       }
-      res
-        .status(StatusCodes.OK)
-        .json({ message: "Unliked", data: existingLike });
+      res.status(StatusCodes.OK).json({ msg: "Unliked", data: existingLike });
     } else {
       const newLike = new Like({ user: userId, reply: replyId });
       await newLike.save();
@@ -97,7 +94,7 @@ const likeReply = async (req, res) => {
       }
 
       await updateReward(userId, "tokens", 0.1);
-      res.status(StatusCodes.OK).json({ message: "Liked", data: newLike });
+      res.status(StatusCodes.OK).json({ msg: "Liked", data: newLike });
     }
   } catch (error) {
     console.error(error);
@@ -111,7 +108,7 @@ const likeReel = async (req, res) => {
     throw new BadRequestError("Reel Id not available");
   }
 
-  const userId = req.user;
+  const userId = req.user.userId;
 
   const reel = await Reel.findById(reelId);
   if (!reel) {
@@ -122,14 +119,12 @@ const likeReel = async (req, res) => {
     const existingLike = await Like.findOne({ user: userId, reel: reel.id });
     if (existingLike) {
       await Like.findByIdAndDelete(existingLike.id);
-      res
-        .status(StatusCodes.OK)
-        .json({ message: "Unliked", data: existingLike });
+      res.status(StatusCodes.OK).json({ msg: "Unliked", data: existingLike });
     } else {
       const newLike = new Like({ user: userId, reel: reel.id });
       await newLike.save();
       await updateReward(userId, "tokens", 0.1);
-      res.status(StatusCodes.OK).json({ message: "Liked", data: newLike });
+      res.status(StatusCodes.OK).json({ msg: "Liked", data: newLike });
     }
   } catch (error) {
     console.error(error);
@@ -140,30 +135,65 @@ const likeReel = async (req, res) => {
 };
 
 const listLikes = async (req, res) => {
-  const { type, entityId } = req.body;
+  const { type, entityId, searchQuery, page = 1, limit = 15 } = req.query;
+  const userId = req.user.userId;
 
   try {
     let likes;
+    let query = {};
+    let populateQuery = {
+      path: "user",
+      select: "username userImage name id",
+    };
+
     if (type === "reel") {
-      likes = await Like.find({ reel: entityId }).populate(
-        "user",
-        "username userImage name"
-      );
+      query.reel = entityId;
     } else if (type === "comment") {
-      likes = await Like.find({ comment: entityId }).populate(
-        "user",
-        "username userImage name"
-      );
+      query.comment = entityId;
     } else if (type === "reply") {
-      likes = await Like.find({ reply: entityId }).populate(
-        "user",
-        "username userImage name"
-      );
+      query.reply = entityId;
     } else {
       throw new BadRequestError("Invalid type");
     }
 
-    res.status(StatusCodes.OK).json(likes);
+    if (searchQuery) {
+      populateQuery.match = {
+        $or: [
+          { username: { $regex: searchQuery, $options: "i" } },
+          { name: { $regex: searchQuery, $options: "i" } },
+        ],
+      };
+    }
+
+    likes = await Like.find(query).populate(populateQuery).lean();
+
+    likes = likes.filter((like) => like.user);
+
+    const userFollowing = await User.findById(userId)
+      .select("following")
+      .lean();
+    const followingIds = new Set(
+      userFollowing.following.map((id) => id.toString())
+    );
+
+    likes = likes.map((like) => {
+      return {
+        ...like.user,
+        isFollowing: followingIds.has(like.user._id.toString()),
+      };
+    });
+
+    likes.sort((a, b) => {
+      const aFollow = a.isFollowing;
+      const bFollow = b.isFollowing;
+      return aFollow === bFollow ? 0 : aFollow ? -1 : 1;
+    });
+
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+    const paginatedLikes = likes.slice(startIndex, endIndex);
+
+    res.status(StatusCodes.OK).json(paginatedLikes);
   } catch (error) {
     console.error(error);
     res

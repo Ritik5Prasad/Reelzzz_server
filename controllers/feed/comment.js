@@ -6,6 +6,7 @@ const Reward = require("../../models/Reward");
 
 const Like = require("../../models/Like");
 const Comment = require("../../models/Comment");
+const Reply = require("../../models/Reply");
 
 const getPaginatedComments = async (req, res) => {
   const { reelId, limit = 10, offset = 0 } = req.query;
@@ -20,8 +21,8 @@ const getPaginatedComments = async (req, res) => {
       .limit(limit)
       .skip(offset)
       .select("-likes")
-      .populate("user", "username userImage")
-      .populate("subReplies.user", "username userImage")
+      .populate("user", "username userImage id name")
+      .populate("replies.user", "username userImage id  name")
       .exec();
 
     // Sort comments based on the defined priorities
@@ -32,10 +33,10 @@ const getPaginatedComments = async (req, res) => {
       if (a.isLikedByAuthor && !b.isLikedByAuthor) return -1;
       if (!a.isLikedByAuthor && b.isLikedByAuthor) return 1;
 
-      const aHasUserReply = a.subReplies.some(
+      const aHasUserReply = a.replies.some(
         (reply) => reply.user._id.toString() === userId
       );
-      const bHasUserReply = b.subReplies.some(
+      const bHasUserReply = b.replies.some(
         (reply) => reply.user._id.toString() === userId
       );
 
@@ -59,10 +60,19 @@ const getPaginatedComments = async (req, res) => {
     const finalComments = await Promise.all(
       sortedComments.map(async (comment) => {
         const likesCount = await Like.countDocuments({ comment: comment._id });
+        const isLiked = await Like.countDocuments({
+          comment: comment._id,
+          user: userId,
+        });
+        const repliesCount = await Reply.countDocuments({
+          comment: comment._id,
+        });
 
         return {
           ...comment.toJSON(),
           likesCount,
+          repliesCount,
+          isLiked: isLiked == 0 ? false : true,
         };
       })
     );

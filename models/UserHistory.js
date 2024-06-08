@@ -13,7 +13,7 @@ const UserHistorySchema = new mongoose.Schema({
     },
   ],
 });
-
+UserHistorySchema.index({ user: 1 });
 const UserHistory = mongoose.model("UserHistory", UserHistorySchema);
 
 module.exports = UserHistory;

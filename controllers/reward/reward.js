@@ -15,10 +15,7 @@ const getRewards = async (req, res) => {
   }
 
   try {
-    const reward = await Reward.findOne({ user: userId }).populate(
-      "user",
-      "username userImage name"
-    );
+    const reward = await Reward.findOne({ user: userId });
     if (!reward) {
       throw new NotFoundError("Reward not found");
     }
@@ -37,19 +34,13 @@ const getRewards = async (req, res) => {
 };
 
 const redeemTokens = async (req, res) => {
-  const { tokensToRedeem } = req.body;
+  const { amount } = req.body;
 
-  if (!tokensToRedeem) {
+  if (!amount) {
     throw new BadRequestError("Invalid Body");
   }
-  const accessToken = req.headers.authorization?.split(" ")[1];
 
-  const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
-  const userId = decodedToken.userId;
-  const user = await User.findById(userId);
-  if (!user) {
-    throw new NotFoundError("User not found");
-  }
+  const userId = req.user.userId;
 
   try {
     const reward = await Reward.findOne({ user: userId });
@@ -57,11 +48,11 @@ const redeemTokens = async (req, res) => {
       throw new NotFoundError("Reward not found");
     }
 
-    if (reward.tokens < tokensToRedeem) {
+    if (reward.tokens < amount) {
       throw new BadRequestError("Insufficient tokens");
     }
 
-    reward.tokens -= tokensToRedeem;
+    reward.tokens -= amount;
     await reward.save();
 
     res
@@ -82,18 +73,11 @@ const redeemTokens = async (req, res) => {
 };
 
 const withdrawRupees = async (req, res) => {
-  const { rupeesToWithdraw } = req.body;
-  if (!rupeesToWithdraw) {
+  const { amount } = req.body;
+  if (!amount) {
     throw new BadRequestError("Invalid Body");
   }
-  const accessToken = req.headers.authorization?.split(" ")[1];
-
-  const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
-  const userId = decodedToken.userId;
-  const user = await User.findById(userId);
-  if (!user) {
-    throw new NotFoundError("User not found");
-  }
+  const userId = req.user.userId;
 
   try {
     const reward = await Reward.findOne({ user: userId });
@@ -101,11 +85,11 @@ const withdrawRupees = async (req, res) => {
       throw new NotFoundError("Reward not found");
     }
 
-    if (reward.rupees < rupeesToWithdraw) {
+    if (reward.rupees < amount) {
       throw new BadRequestError("Insufficient rupees");
     }
 
-    reward.rupees -= rupeesToWithdraw;
+    reward.rupees -= amount;
     await reward.save();
 
     res

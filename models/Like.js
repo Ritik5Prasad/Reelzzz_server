@@ -10,6 +10,10 @@ const LikeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+LikeSchema.index({ user: 1, reel: 1 });
+LikeSchema.index({ user: 1, comment: 1 });
+LikeSchema.index({ user: 1, reply: 1 });
+
 const Like = mongoose.model("Like", LikeSchema);
 
 module.exports = Like;
