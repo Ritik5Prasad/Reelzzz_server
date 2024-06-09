@@ -16,73 +16,76 @@ const getPaginatedComments = async (req, res) => {
     throw new NotFoundError("User not found");
   }
   try {
-    // Fetch comments and sort them based on the defined criteria
+    // Fetch comments with the required fields and sort them by createdAt initially
     const comments = await Comment.find({ reel: reelId })
-      .limit(limit)
-      .skip(offset)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(offset))
       .select("-likes")
       .populate("user", "username userImage id name")
-      .populate("replies.user", "username userImage id  name")
+      .populate("replies.user", "username userImage id name")
       .exec();
 
-    // Sort comments based on the defined priorities
-    const sortedComments = comments.sort((a, b) => {
+    // Get all comment IDs for batch operations
+    const commentIds = comments.map(comment => comment._id);
+
+    // Fetch likes and replies counts in a single batch query using aggregation
+    const [likesCounts, repliesCounts, userLikes] = await Promise.all([
+      Like.aggregate([
+        { $match: { comment: { $in: commentIds } } },
+        { $group: { _id: "$comment", count: { $sum: 1 } } },
+      ]),
+      Reply.aggregate([
+        { $match: { comment: { $in: commentIds } } },
+        { $group: { _id: "$comment", count: { $sum: 1 } } },
+      ]),
+      Like.find({ user: userId, comment: { $in: commentIds } }).distinct('comment'),
+    ]);
+
+    // Convert arrays to maps for quick lookup
+    const likesCountMap = new Map(likesCounts.map(item => [item._id.toString(), item.count]));
+    const repliesCountMap = new Map(repliesCounts.map(item => [item._id.toString(), item.count]));
+    const userLikesSet = new Set(userLikes.map(id => id.toString()));
+
+    // Enrich comments with counts and liked status
+    const enrichedComments = comments.map(comment => {
+      const commentJSON = comment.toJSON();
+      commentJSON.likesCount = likesCountMap.get(comment._id.toString()) || 0;
+      commentJSON.repliesCount = repliesCountMap.get(comment._id.toString()) || 0;
+      commentJSON.isLiked = userLikesSet.has(comment._id.toString());
+      return commentJSON;
+    });
+
+    // Sort comments based on custom criteria
+    const sortedComments = enrichedComments.sort((a, b) => {
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
 
       if (a.isLikedByAuthor && !b.isLikedByAuthor) return -1;
       if (!a.isLikedByAuthor && b.isLikedByAuthor) return 1;
 
-      const aHasUserReply = a.replies.some(
-        (reply) => reply.user._id.toString() === userId
-      );
-      const bHasUserReply = b.replies.some(
-        (reply) => reply.user._id.toString() === userId
-      );
+      const aHasUserReply = a.replies.some(reply => reply.user._id.toString() === userId);
+      const bHasUserReply = b.replies.some(reply => reply.user._id.toString() === userId);
 
       if (aHasUserReply && !bHasUserReply) return -1;
       if (!aHasUserReply && bHasUserReply) return 1;
 
-      if (a.likes > b.likes) return -1;
-      if (a.likes < b.likes) return 1;
+      if (a.likesCount > b.likesCount) return -1;
+      if (a.likesCount < b.likesCount) return 1;
 
-      const aUserFollowing =
-        a.user.followers && a.user.followers.includes(userId);
-      const bUserFollowing =
-        b.user.followers && b.user.followers.includes(userId);
+      const aUserFollowing = a.user.followers && a.user.followers.includes(userId);
+      const bUserFollowing = b.user.followers && b.user.followers.includes(userId);
 
       if (aUserFollowing && !bUserFollowing) return -1;
       if (!aUserFollowing && bUserFollowing) return 1;
 
-      return new Date(b.timestamp) - new Date(a.timestamp);
+      return new Date(b.createdAt) - new Date(a.createdAt);
     });
 
-    const finalComments = await Promise.all(
-      sortedComments.map(async (comment) => {
-        const likesCount = await Like.countDocuments({ comment: comment._id });
-        const isLiked = await Like.countDocuments({
-          comment: comment._id,
-          user: userId,
-        });
-        const repliesCount = await Reply.countDocuments({
-          comment: comment._id,
-        });
-
-        return {
-          ...comment.toJSON(),
-          likesCount,
-          repliesCount,
-          isLiked: isLiked == 0 ? false : true,
-        };
-      })
-    );
-
-    res.status(StatusCodes.OK).json(finalComments);
+    res.status(StatusCodes.OK).json(sortedComments);
   } catch (error) {
     console.error(error);
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ error: "Internal Server Error" });
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: "Internal Server Error" });
   }
 };
 

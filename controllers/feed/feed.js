@@ -29,33 +29,37 @@ const getLikedVideos = async (req, res) => {
       .limit(parseInt(limit))
       .sort({ createdAt: -1 });
 
-    const likedVideosWithCounts = await Promise.all(
-      likedVideos.map(async (like) => {
-        const reel = like.reel;
-        const likesCount = await Like.countDocuments({ reel: reel._id });
-        const commentsCount = await Comment.countDocuments({
-          reel: reel._id,
-        });
-        const reelJSON = reel.toJSON();
-        reelJSON.user.isFollowing = user.following.includes(reel.user._id);
+    if (!likedVideos) {
+      return res.status(StatusCodes.OK).json({ reelData: [] });
+    }
 
-        return {
-          ...reelJSON,
-          likesCount,
-          commentsCount,
-          isLiked: true,
-        };
-      })
-    );
+    const reelIds = likedVideos.map(like => like.reel._id);
+    const [likesCounts, commentsCounts, likedReels] = await Promise.all([
+      Like.aggregate([{ $match: { reel: { $in: reelIds } } }, { $group: { _id: "$reel", count: { $sum: 1 } } }]),
+      Comment.aggregate([{ $match: { reel: { $in: reelIds } } }, { $group: { _id: "$reel", count: { $sum: 1 } } }]),
+      Like.find({ user: userId, reel: { $in: reelIds } }).distinct('reel')
+    ]);
+
+    const likesCountMap = new Map(likesCounts.map(item => [item._id.toString(), item.count]));
+    const commentsCountMap = new Map(commentsCounts.map(item => [item._id.toString(), item.count]));
+    const likedReelsSet = new Set(likedReels.map(id => id.toString()));
+
+    const likedVideosWithCounts = likedVideos.map(like => {
+      const reel = like.reel.toJSON();
+      reel.likesCount = likesCountMap.get(reel._id.toString()) || 0;
+      reel.commentsCount = commentsCountMap.get(reel._id.toString()) || 0;
+      reel.isLiked = likedReelsSet.has(reel._id.toString());
+      reel.user.isFollowing = user.following.includes(reel.user._id);
+      return reel;
+    });
 
     res.status(StatusCodes.OK).json({ reelData: likedVideosWithCounts });
   } catch (error) {
     console.error(error);
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ error: "Internal Server Error" });
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: "Internal Server Error" });
   }
 };
+
 
 // Get user's reel posts with counts
 const getReelPosts = async (req, res) => {
@@ -74,32 +78,33 @@ const getReelPosts = async (req, res) => {
       .select("-comments -likes")
       .exec();
 
-    const myReelPostsWithCounts = await Promise.all(
-      myReelPosts.map(async (reelPost) => {
-        const likesCount = await Like.countDocuments({ reel: reelPost._id });
-        const commentsCount = await Comment.countDocuments({
-          reel: reelPost._id,
-        });
-        const reelPostJSON = reelPost.toJSON();
-        reelPostJSON.user.isFollowing = user.following.includes(
-          reelPost.user._id
-        );
-        const isLiked = await Like.exists({ user: userId, reel: reelPost._id });
-        return {
-          ...reelPostJSON,
-          likesCount,
-          commentsCount,
-          isLiked: !!isLiked,
-        };
-      })
-    );
+    const reelIds = myReelPosts.map(reel => reel._id);
+    const [likesCounts, commentsCounts, likedReels] = await Promise.all([
+      Like.aggregate([{ $match: { reel: { $in: reelIds } } }, { $group: { _id: "$reel", count: { $sum: 1 } } }]),
+      Comment.aggregate([{ $match: { reel: { $in: reelIds } } }, { $group: { _id: "$reel", count: { $sum: 1 } } }]),
+      Like.find({ user: userId, reel: { $in: reelIds } }).distinct('reel')
+    ]);
+
+    const likesCountMap = new Map(likesCounts.map(item => [item._id.toString(), item.count]));
+    const commentsCountMap = new Map(commentsCounts.map(item => [item._id.toString(), item.count]));
+    const likedReelsSet = new Set(likedReels.map(id => id.toString()));
+
+    const myReelPostsWithCounts = myReelPosts.map(reel => {
+      const reelJSON = reel.toJSON();
+      reelJSON.likesCount = likesCountMap.get(reel._id.toString()) || 0;
+      reelJSON.commentsCount = commentsCountMap.get(reel._id.toString()) || 0;
+      reelJSON.isLiked = likedReelsSet.has(reel._id.toString());
+      reelJSON.user.isFollowing = user.following.includes(reel.user._id);
+      return reelJSON;
+    });
 
     res.status(StatusCodes.OK).json({ reelData: myReelPostsWithCounts });
   } catch (error) {
     console.error(error);
-    throw new BadRequestError(error);
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: "Internal Server Error" });
   }
 };
+
 
 // Get all history reels with counts
 const getAllHistoryReels = async (req, res) => {
@@ -117,36 +122,38 @@ const getAllHistoryReels = async (req, res) => {
       return res.status(StatusCodes.OK).json({ watchedReels: [] });
     }
 
-    const allHistoryReels = userHistory.reels.reverse();
+    const historyReelIds = userHistory.reels.reverse().map(historyReel => historyReel.reel);
+    const reels = await Reel.find({ _id: { $in: historyReelIds } })
+      .select("-comments -likes")
+      .populate("user", "name userImage username id")
+      .exec();
 
-    const watchedReelsWithCounts = await Promise.all(
-      allHistoryReels.map(async (historyReel) => {
-        const reel = await Reel.findById(historyReel.reel)
-          .select("-comments -likes")
-          .populate("user", "name userImage username id")
-          .exec();
-        const likesCount = await Like.countDocuments({ reel: reel._id });
-        const commentsCount = await Comment.countDocuments({
-          reel: reel._id,
-        });
-        const reelJSON = reel.toJSON();
-        reelJSON.user.isFollowing = user.following.includes(reel.user._id);
-        const isLiked = await Like.exists({ user: userId, reel: reelPost._id });
-        return {
-          ...reelJSON,
-          likesCount,
-          isLiked: !!isLiked,
-          commentsCount,
-        };
-      })
-    );
+    const [likesCounts, commentsCounts, likedReels] = await Promise.all([
+      Like.aggregate([{ $match: { reel: { $in: historyReelIds } } }, { $group: { _id: "$reel", count: { $sum: 1 } } }]),
+      Comment.aggregate([{ $match: { reel: { $in: historyReelIds } } }, { $group: { _id: "$reel", count: { $sum: 1 } } }]),
+      Like.find({ user: userId, reel: { $in: historyReelIds } }).distinct('reel')
+    ]);
+
+    const likesCountMap = new Map(likesCounts.map(item => [item._id.toString(), item.count]));
+    const commentsCountMap = new Map(commentsCounts.map(item => [item._id.toString(), item.count]));
+    const likedReelsSet = new Set(likedReels.map(id => id.toString()));
+
+    const watchedReelsWithCounts = reels.map(reel => {
+      const reelJSON = reel.toJSON();
+      reelJSON.likesCount = likesCountMap.get(reel._id.toString()) || 0;
+      reelJSON.commentsCount = commentsCountMap.get(reel._id.toString()) || 0;
+      reelJSON.isLiked = likedReelsSet.has(reel._id.toString());
+      reelJSON.user.isFollowing = user.following.includes(reel.user._id);
+      return reelJSON;
+    });
 
     res.status(StatusCodes.OK).json({ reelData: watchedReelsWithCounts });
   } catch (error) {
     console.error(error);
-    throw new BadRequestError(error);
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: "Internal Server Error" });
   }
 };
+
 
 // Mark reels as watched
 const markReelsWatched = async (req, res) => {
@@ -203,45 +210,49 @@ const getHomeFeed = async (req, res) => {
   try {
     const following = user.following;
 
-    const userHistory = await UserHistory.findOne({ user: userId }).populate(
-      "user",
-      "name id username userImage"
-    );
-    const watchedReelIds = userHistory
-      ? userHistory.reels.map((r) => r.reel)
-      : [];
+    const userHistory = await UserHistory.findOne({ user: userId });
+    const watchedReelIds = userHistory ? userHistory.reels.map((r) => r.reel) : [];
 
     const uniqueReelsMap = new Map();
     let totalReels = 0;
 
-    // Helper function to add reels to the unique map and count
     const addReelsToMap = async (reels) => {
+      const reelIds = reels.map(reel => reel._id);
+      const [likesCounts, commentsCounts, likedReels] = await Promise.all([
+        Like.aggregate([{ $match: { reel: { $in: reelIds } } }, { $group: { _id: "$reel", count: { $sum: 1 } } }]),
+        Comment.aggregate([{ $match: { reel: { $in: reelIds } } }, { $group: { _id: "$reel", count: { $sum: 1 } } }]),
+        Like.find({ user: userId, reel: { $in: reelIds } }).distinct('reel')
+      ]);
+
+      const likesCountMap = new Map(likesCounts.map(item => [item._id.toString(), item.count]));
+      const commentsCountMap = new Map(commentsCounts.map(item => [item._id.toString(), item.count]));
+      const likedReelsSet = new Set(likedReels.map(id => id.toString()));
+
       for (const reel of reels) {
         if (!uniqueReelsMap.has(reel._id.toString())) {
-          const likesCount = await Like.countDocuments({ reel: reel._id });
-          const commentsCount = await Comment.countDocuments({
-            reel: reel._id,
-          });
-          const isLiked = await Like.exists({ user: userId, reel: reel._id });
-          reel.isLiked = !!isLiked;
-          reel.likesCount = likesCount;
-          reel.commentsCount = commentsCount;
+          reel.isLiked = likedReelsSet.has(reel._id.toString());
+          reel.likesCount = likesCountMap.get(reel._id.toString()) || 0;
+          reel.commentsCount = commentsCountMap.get(reel._id.toString()) || 0;
           uniqueReelsMap.set(reel._id.toString(), reel);
           totalReels += 1;
         }
       }
     };
 
+    const fetchReels = async (query, options = {}) => {
+      return Reel.find(query)
+        .sort(options.sort || { createdAt: -1 })
+        .limit(options.limit || limit)
+        .select("-likes -comments")
+        .populate("user", "username name id userImage")
+        .exec();
+    };
+
     // Fetch reels from following
-    const reelsFromFollowing = await Reel.find({
+    const reelsFromFollowing = await fetchReels({
       user: { $in: following },
       _id: { $nin: watchedReelIds },
-    })
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .select("-likes -comments")
-      .populate("user", "username name id userImage")
-      .exec();
+    });
 
     await addReelsToMap(reelsFromFollowing);
 
@@ -296,11 +307,9 @@ const getHomeFeed = async (req, res) => {
     // Fetch latest reels
     if (totalReels < limit + offset) {
       const remainingLimit = limit + offset - totalReels;
-      const latestReels = await Reel.find({ _id: { $nin: watchedReelIds } })
-        .sort({ createdAt: -1 })
-        .limit(remainingLimit)
-        .populate("user", "username name id userImage")
-        .exec();
+      const latestReels = await fetchReels({
+        _id: { $nin: watchedReelIds },
+      }, { limit: remainingLimit });
 
       await addReelsToMap(latestReels);
     }
@@ -311,7 +320,6 @@ const getHomeFeed = async (req, res) => {
       return res.status(StatusCodes.OK).json({ reels: [] });
     }
 
-    // Slice the result based on offset and limit
     const response = uniqueReels.slice(offset, offset + limit).map((reel) => ({
       _id: reel._id,
       videoUri: reel.videoUri,
@@ -333,9 +341,11 @@ const getHomeFeed = async (req, res) => {
     res.status(StatusCodes.OK).json({ reels: response });
   } catch (error) {
     console.error(error);
-    throw new BadRequestError(error);
+    throw new BadRequestError(error.message);
   }
 };
+
+
 
 module.exports = {
   getLikedVideos,
