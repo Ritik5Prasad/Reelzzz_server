@@ -173,19 +173,17 @@ const getFollowers = async (req, res) => {
 
   const followers = await User.aggregate([
     {
-      $match: { _id: { $in: user.followers } },
-    },
-    {
-      $addFields: {
-        isFollowing: { $in: [currentUserId, "$following"] },
-      },
-    },
-    {
       $match: {
+        _id: { $in: user.followers },
         $or: [
           { name: { $regex: searchText, $options: "i" } },
           { username: { $regex: searchText, $options: "i" } },
         ],
+      },
+    },
+    {
+      $addFields: {
+        isFollowing: { $in: [currentUserId, "$following"] },
       },
     },
     {
@@ -225,6 +223,7 @@ const getFollowing = async (req, res) => {
   }
 
   const user = await User.findById(userId);
+
   if (!user) {
     throw new NotFoundError("User not found");
   }
@@ -253,7 +252,6 @@ const getFollowing = async (req, res) => {
         userImage: 1,
         id: 1,
         isFollowing: 1,
-        followersValue: 1,
       },
     },
     {
@@ -269,7 +267,6 @@ const getFollowing = async (req, res) => {
     },
   ]);
 
-  console.log(following);
   res.status(StatusCodes.OK).json(following);
 };
 

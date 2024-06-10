@@ -82,6 +82,7 @@ const getPaginatedReplies = async (req, res) => {
         const isLiked = await Like.countDocuments({
           reply: reply.id,
           user: userId,
+          reel: reply.reel,
         });
         return {
           ...reply.toJSON(),
