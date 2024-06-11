@@ -9,13 +9,15 @@
 
 
 <div align="center">
-   <img src="https://resources.groww.in/web-assets/img/website-logo/groww-logo-light.svg"/>
-  <h3 align="center">Packed with Node JS, Express and Mongo DB</h3>
-   <img src="https://skillicons.dev/icons?i=nodejs,express,mongo,aws"/>
+   <img  width="60" height="60"src="https://res.cloudinary.com/dtotfsciz/image/upload/v1718078871/jizurnuoxq6xqvswxwuh.png"/>
+  <h3 align="center">Packed with Brain JS, Lang Chain, Node JS, Express and Mongo DB</h3>
+   <img src="https://skillicons.dev/icons?i=nodejs,express,mongo"/>
+  <div />
+   <img   width="150" height="120" src="https://res.cloudinary.com/dtotfsciz/image/upload/v1718079263/y5uezi4zxdos09gcf91f.png"/>
 </div>
 
 
-Welcome to the Groww Server repository! This Node.js application serves as the backend for the Groww Clone project. Below, you'll find instructions on how to set up the development environment and configure necessary variables using the `.env` file.
+Welcome to the Reelzzz Server repository! This Node.js application serves as the backend for the Reelzzz project. Below, you'll find instructions on how to set up the development environment and configure necessary variables using the `.env` file.
 
 
 ## Installation
@@ -25,13 +27,13 @@ Before you begin, make sure you have Node.js and npm installed on your system. Y
 1. Clone this repository to your local machine:
 
 ```sh
-   git clone https://github.com/Ritik5Prasad/GrowwServer.git
+   git clone https://github.com/Ritik5Prasad/Reelzzz_server.git
 ```
 
 2. Navigate to the project directory:
 
 ```sh
-   cd groww-server
+   cd Reelzzz_server
  ```
 
 3. Rename the `env_template` according to your need local or prod file to `.env`:
@@ -42,7 +44,7 @@ Before you begin, make sure you have Node.js and npm installed on your system. Y
 
 ## Configuration
 
-Open the `.env` file in your favorite text editor and fill in the required details. If you're unsure about what to fill, you can refer to the following YouTube playlist for guidance: [Groww Clone YouTube Playlist](https://youtu.be/Y9jpFvzkofI?si=KxT_XP9-UrnWcVIS).
+Open the `.env` file in your favorite text editor and fill in the required details. If you're unsure about what to fill, you can refer to the following YouTube playlist for guidance: [Reelzz  YouTube Playlist](https://www.youtube.com/channel/UChQgXWG96_uPHj40gNh4MNg).
 
 
 ## Running the Server
