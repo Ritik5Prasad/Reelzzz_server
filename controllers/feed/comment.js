@@ -27,7 +27,7 @@ const getPaginatedComments = async (req, res) => {
       .exec();
 
     // Get all comment IDs for batch operations
-    const commentIds = comments.map(comment => comment._id);
+    const commentIds = comments.map((comment) => comment._id);
 
     // Fetch likes and replies counts in a single batch query using aggregation
     const [likesCounts, repliesCounts, userLikes] = await Promise.all([
@@ -39,19 +39,26 @@ const getPaginatedComments = async (req, res) => {
         { $match: { comment: { $in: commentIds } } },
         { $group: { _id: "$comment", count: { $sum: 1 } } },
       ]),
-      Like.find({ user: userId, comment: { $in: commentIds } }).distinct('comment'),
+      Like.find({ user: userId, comment: { $in: commentIds } }).distinct(
+        "comment"
+      ),
     ]);
 
     // Convert arrays to maps for quick lookup
-    const likesCountMap = new Map(likesCounts.map(item => [item._id.toString(), item.count]));
-    const repliesCountMap = new Map(repliesCounts.map(item => [item._id.toString(), item.count]));
-    const userLikesSet = new Set(userLikes.map(id => id.toString()));
+    const likesCountMap = new Map(
+      likesCounts.map((item) => [item._id.toString(), item.count])
+    );
+    const repliesCountMap = new Map(
+      repliesCounts.map((item) => [item._id.toString(), item.count])
+    );
+    const userLikesSet = new Set(userLikes.map((id) => id.toString()));
 
     // Enrich comments with counts and liked status
-    const enrichedComments = comments.map(comment => {
+    const enrichedComments = comments.map((comment) => {
       const commentJSON = comment.toJSON();
       commentJSON.likesCount = likesCountMap.get(comment._id.toString()) || 0;
-      commentJSON.repliesCount = repliesCountMap.get(comment._id.toString()) || 0;
+      commentJSON.repliesCount =
+        repliesCountMap.get(comment._id.toString()) || 0;
       commentJSON.isLiked = userLikesSet.has(comment._id.toString());
       return commentJSON;
     });
@@ -64,8 +71,12 @@ const getPaginatedComments = async (req, res) => {
       if (a.isLikedByAuthor && !b.isLikedByAuthor) return -1;
       if (!a.isLikedByAuthor && b.isLikedByAuthor) return 1;
 
-      const aHasUserReply = a.replies.some(reply => reply.user._id.toString() === userId);
-      const bHasUserReply = b.replies.some(reply => reply.user._id.toString() === userId);
+      const aHasUserReply = a.replies.some(
+        (reply) => reply.user._id.toString() === userId
+      );
+      const bHasUserReply = b.replies.some(
+        (reply) => reply.user._id.toString() === userId
+      );
 
       if (aHasUserReply && !bHasUserReply) return -1;
       if (!aHasUserReply && bHasUserReply) return 1;
@@ -73,8 +84,10 @@ const getPaginatedComments = async (req, res) => {
       if (a.likesCount > b.likesCount) return -1;
       if (a.likesCount < b.likesCount) return 1;
 
-      const aUserFollowing = a.user.followers && a.user.followers.includes(userId);
-      const bUserFollowing = b.user.followers && b.user.followers.includes(userId);
+      const aUserFollowing =
+        a.user.followers && a.user.followers.includes(userId);
+      const bUserFollowing =
+        b.user.followers && b.user.followers.includes(userId);
 
       if (aUserFollowing && !bUserFollowing) return -1;
       if (!aUserFollowing && bUserFollowing) return 1;
@@ -85,7 +98,9 @@ const getPaginatedComments = async (req, res) => {
     res.status(StatusCodes.OK).json(sortedComments);
   } catch (error) {
     console.error(error);
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: "Internal Server Error" });
+    res
+      .status(StatusCodes.INTERNAL_SERVER_ERROR)
+      .json({ error: "Internal Server Error" });
   }
 };
 
@@ -126,7 +141,7 @@ const createComment = async (req, res) => {
 
     res
       .status(StatusCodes.CREATED)
-      .json({ _id: newComment.id, ...newComment.toJSON() });
+      .json({ _id: newComment.id, ...newComment.toJSON(), repliesCount: 0 });
   } catch (error) {
     console.error(error);
     if (error instanceof NotFoundError) {
