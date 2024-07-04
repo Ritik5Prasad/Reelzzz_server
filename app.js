@@ -20,9 +20,11 @@ const rewardRouter = require("./routes/reward");
 const feedRouter = require("./routes/feed");
 const user = require("./routes/user");
 const replyRouter = require("./routes/reply");
+const shareRouter = require("./routes/share");
 
 app.use("/oauth", authRouter);
 app.use("/file", fileRouter);
+app.use("/share", shareRouter);
 app.use("/user", authMiddleware, user);
 app.use("/comment", authMiddleware, commentRouter);
 app.use("/reply", authMiddleware, replyRouter);
